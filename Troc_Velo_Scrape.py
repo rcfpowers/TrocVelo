@@ -118,7 +118,8 @@ for page in range(1, 34):
 
 #We are only looking at announcements in France
 df = df[df['country']=="France"]
-df.to_csv('/Users/cpowers/Desktop/troc_velo_announcements.csv')
+df.drop(columns=df.columns[df.columns.str.contains('^Unnamed')], inplace = True)
+df.to_csv('/Users/cpowers/Desktop/DEPP/Data_Scraping/TrocVelo/troc_velo_announcements.csv')
 
 #We place the updated csv to our common google drive folder, located through
 # the metadata. We upload the csv file saved locally to the Google Drive Folder.
@@ -126,7 +127,7 @@ file_metadata = {
     'name': 'troc_velo_announcements.csv',  
     'parents': [folder_id]  
 }
-media = MediaFileUpload('/Users/cpowers/Desktop/troc_velo_announcements.csv', mimetype='text/csv', resumable=True)
+media = MediaFileUpload('/Users/cpowers/Desktop/DEPP/Data_Scraping/TrocVelo/troc_velo_announcements.csv', mimetype='text/csv', resumable=True)
 
 request = service.files().create(body=file_metadata, media_body=media)
 
