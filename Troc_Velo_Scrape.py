@@ -201,3 +201,35 @@ final_df_in = pd.merge(geo_df,df2,left_on=["Code Postal","Commune_mrg"], right_o
 #Exporting the merged data set
 final_df_in.to_csv('/Users/cpowers/Desktop/DEPP/In_Progress/Data_Scraping/TrocVelo/cities_in.csv',index=False)
 
+
+df = pd.read_csv("/Users/cpowers/Desktop/DEPP/In_Progress/Data_Scraping/TrocVelo/troc_velo_announcements.csv")  # Replace with the actual file path
+df = df.dropna(subset=["Code INSEE"])
+df['Code INSEE'] = df['Code INSEE'].astype(str)
+df['Code Postal'] = df['Code Postal'].apply(
+    lambda x: str(int(float(x))) if str(x).replace(".0", "").isdigit() else x
+)
+df["Code Département"] = df["Code Département"].apply(
+    lambda x: str(int(float(x))) if str(x).replace(".0", "").isdigit() else x
+
+df_insee = df.groupby("Code INSEE", as_index=False).agg(
+    total_population=("Population", "mean"),
+    total_unique_users=("user_id", "nunique"),
+    total_announcements=("id", "count")
+)
+print(df_insee)
+
+# Step 3: Group by "Code Département" (Department level)
+df_departement = df_insee.merge(df[["Code INSEE", "Code Département"]].drop_duplicates(), on="Code INSEE")
+print(df_departement)
+df_test = df_departement[df_departement['Code INSEE'] == '01004']
+print(df_test)
+df_departement = df_departement.groupby("Code Département", as_index=False).agg(
+    total_population=("total_population", "sum"),
+    total_unique_users=("total_unique_users", "sum"),
+    total_announcements=("total_announcements", "sum")
+)
+
+# Display final result
+print(df_departement['Code Département'].unique())
+print(df_departement.describe())
+print(df_departement.loc[df_departement["total_announcements"].idxmax()])
