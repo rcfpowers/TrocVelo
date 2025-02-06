@@ -5,11 +5,28 @@ import sys
 import io
 import os
 import pandas as pd
+import geopandas as gpd
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from unidecode import unidecode
 
+#This french accent mapping is used to string match the names of communes 
+#across the two data sets from INSEE and TrocVélo. It is normalized to be
+#able to map it across a dataframe
+normalMap = {'À': 'A', 'Â': 'A',
+             'à': 'a', 'â': 'a',
+             'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',
+             'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+             'Î': 'I', 'Ï': 'I',
+             'î': 'i', 'ï': 'i',
+             'Ô': 'O',
+             'ô': 'o',
+             'Ù': 'U', 'Û': 'U', 'Ü': 'U',
+             'ù': 'u', 'û': 'u', 'ü': 'u',
+             'Ç': 'C', 'ç': 'c',}
+normalize = str.maketrans(normalMap)
 
 #API credentials and user information to pull the data we have already scraped
 # from troc-velo in previous days. 
@@ -119,7 +136,11 @@ for page in range(1, 34):
 #We are only looking at announcements in France
 df = df[df['country']=="France"]
 df.drop(columns=df.columns[df.columns.str.contains('^Unnamed')], inplace = True)
-df.to_csv('/Users/cpowers/Desktop/DEPP/Data_Scraping/TrocVelo/troc_velo_announcements.csv')
+df.to_csv('/Users/cpowers/Desktop/DEPP/In_Progress/Data_Scraping/TrocVelo/troc_velo_announcements.csv')
+
+gdf = gpd.read_file('/Users/cpowers/Desktop/DEPP/In_Progress/Data_Scraping/TrocVelo/france-20240601.geojson')
+gdf = gdf[gdf.is_valid]
+gdf.head(5)
 
 #We place the updated csv to our common google drive folder, located through
 # the metadata. We upload the csv file saved locally to the Google Drive Folder.
@@ -127,7 +148,7 @@ file_metadata = {
     'name': 'troc_velo_announcements.csv',  
     'parents': [folder_id]  
 }
-media = MediaFileUpload('/Users/cpowers/Desktop/DEPP/Data_Scraping/TrocVelo/troc_velo_announcements.csv', mimetype='text/csv', resumable=True)
+media = MediaFileUpload('/Users/cpowers/Desktop/DEPP/In_Progress/Data_Scraping/TrocVelo/troc_velo_announcements.csv', mimetype='text/csv', resumable=True)
 
 request = service.files().create(body=file_metadata, media_body=media)
 
@@ -137,3 +158,46 @@ while response is None:
     status, response = request.next_chunk()
     if status:
         print(f"Uploaded {int(status.progress() * 100)}%")
+
+#uploads the INSEE population, Geospatial, and department level data
+geo_df = pd.read_csv("/Users/cpowers/Desktop/DEPP/In_Progress/Data_Scraping/TrocVelo/correspondance-code-insee-code-postal.csv", sep=";")
+
+#Merging the two datasets, which require a lot of cleaning, since the naming
+#conventions are not the same across the datasets and each postal code does not
+#correspond to departement. 
+df2 = df.copy()
+df2.info
+
+#all of geo_df communes are in uppercase. Since this comes from INSEE, we follow
+#that standard
+df2['city_mrg'] = df2['city'].str.upper()
+
+#Lyon, Marseille, and Paris have special cases where the TrocVelo data keeps
+# the arrondissement and city in the same string. The commune name needs to
+# be seperated. Saint cities also have an issue where spelling is ST or SNT
+df2.loc[df2['city_mrg'].str.contains(r'\bLYON(?:-\d+E|)\b', case=False, na=False), 'city_mrg'] = 'LYON'
+df2.loc[df2['city_mrg'].str.contains(r'\bMARSEILLE(?:-\d+E|)\b', case=False, na=False), 'city_mrg'] = 'MARSEILLE'
+df2.loc[df2['city_mrg'].str.contains(r'\bPARIS(?:-\w+|)\b', case=False, na=False), 'city_mrg'] = 'PARIS'
+df2['city_mrg'] = df2['city_mrg'].apply(unidecode)
+df2['city_mrg'] = df2['city_mrg'].str.replace('-',' ')
+df2['city_mrg'] = df2['city_mrg'].str.replace(r'\bST\b |\bSTE\b ', 'SAINT ', regex=True)
+
+#There are unifying string adjustments to make, mainly data structure issues
+#like string classification and removal of unnecssary list objects.
+geo_df['Code Postal'] = geo_df['Code Postal'].astype(str)
+geo_df['Code Postal'] = geo_df['Code Postal'].str.split('/')
+geo_df = geo_df.explode('Code Postal', ignore_index=True)
+geo_df.loc[geo_df['Commune'].str.contains(r'\bLYON\b(?:--.*)?', case=False, na=False), 'Commune'] = 'LYON'
+geo_df.loc[geo_df['Commune'].str.contains(r'\bMARSEILLE\b(?:--.*)?', case=False, na=False), 'Commune'] = 'MARSEILLE'
+geo_df.loc[geo_df['Commune'].str.contains(r'\bPARIS\b(?:--.*)?', case=False, na=False), 'Commune'] = 'PARIS'
+geo_df['Commune_mrg'] = geo_df['Commune'].str.replace('-',' ')
+
+#Finally merging the two datasets on two condition clauses, since code postal
+# and commune name match best to departement level data. There are repeat communes
+# in different departements and postal code does not match directly with
+# Department codes.
+final_df_in = pd.merge(geo_df,df2,left_on=["Code Postal","Commune_mrg"], right_on=['postcode','city_mrg'], how='inner')
+
+#Exporting the merged data set
+final_df_in.to_csv('/Users/cpowers/Desktop/DEPP/In_Progress/Data_Scraping/TrocVelo/cities_in.csv',index=False)
+
